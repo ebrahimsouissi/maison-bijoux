@@ -286,7 +286,7 @@
             <div><label>Price</label><input id="pPrice" placeholder="e.g. 250 DT"></div>
           </div>
           <label>Category <span style="text-transform:none;letter-spacing:0">(optional)</span></label>
-          <input id="pCat" placeholder="e.g. Rings, Necklaces, Earrings">
+          <select id="pCat"></select>
           <label>Description</label>
           <textarea id="pDesc" placeholder="A short description…"></textarea>
           <div style="display:flex;gap:10px">
@@ -302,6 +302,9 @@
           <label>WhatsApp number</label><input id="sWa" placeholder="21612345678">
           <label>Default language</label>
           <select id="sLang"><option value="en">English</option><option value="fr">Français</option><option value="ar">العربية</option></select>
+          <label>Categories <span style="text-transform:none;letter-spacing:0">(Français · English · العربية)</span></label>
+          <div id="catEditor"></div>
+          <button class="btn btn-ghost" type="button" style="margin-bottom:18px" onclick="addCatRow()">+ Add category</button>
           <label>Hero text (English)</label><textarea id="sHeroEn"></textarea>
           <label>Hero text (Français)</label><textarea id="sHeroFr"></textarea>
           <label>Hero text (العربية)</label><textarea id="sHeroAr" dir="rtl"></textarea>
@@ -373,7 +376,29 @@ function toast(m){toastEl.textContent=m;toastEl.classList.add('show');setTimeout
 function esc(s){return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function imgsOf(p){return (p.imgs&&p.imgs.length)?p.imgs:(p.img?[p.img]:[]);}
 
-const DEFAULTS={shopName:'Maison',whatsapp:'',defaultLang:'en',password:'admin123',
+/* CATEGORIES (multilingual) — a category is {id,fr,en,ar}; products store category by id */
+function slugify(s){return (s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'');}
+function normalizeCats(cats){
+  if(!Array.isArray(cats))return DEFAULT_CATS.map(c=>({...c}));
+  return cats.map(c=>typeof c==='string'
+    ?{id:c,fr:c,en:c,ar:c}
+    :{id:c.id||slugify(c.fr||c.en||c.ar)||'cat',fr:c.fr||'',en:c.en||'',ar:c.ar||''});
+}
+function catName(c){return c?(c[lang]||c.fr||c.en||c.ar||c.id):'';}   /* current language, fallback fr→en→ar→id */
+function catNameFr(c){return c?(c.fr||c.en||c.ar||c.id):'';}          /* fr-first, for the admin dropdown */
+function catById(id){return (DB.settings.categories||[]).find(c=>c.id===id)||null;}
+function catLabel(id){const c=catById(id);return c?catName(c):(id||'');}
+
+const DEFAULT_CATS=[
+  {id:'bagues',fr:'Bagues',en:'Rings',ar:'خواتم'},
+  {id:'colliers',fr:'Colliers',en:'Necklaces',ar:'قلائد'},
+  {id:'bracelets',fr:'Bracelets',en:'Bracelets',ar:'أساور'},
+  {id:'boucles',fr:"Boucles d'oreilles",en:'Earrings',ar:'أقراط'},
+  {id:'parures',fr:'Parures',en:'Sets',ar:'أطقم'},
+  {id:'montres',fr:'Montres',en:'Watches',ar:'ساعات'},
+  {id:'autres',fr:'Autres',en:'Other',ar:'أخرى'}
+];
+const DEFAULTS={shopName:'Maison',whatsapp:'',defaultLang:'en',password:'admin123',categories:DEFAULT_CATS,
   heroEn:"Discover our collection of fine jewelry. Found something you love? Order it in seconds through WhatsApp.",
   heroFr:"Découvrez notre collection de bijoux fins. Un coup de cœur ? Commandez-le en quelques secondes via WhatsApp.",
   heroAr:"اكتشف مجموعتنا من المجوهرات الراقية. أعجبتك قطعة؟ اطلبها في ثوانٍ عبر واتساب."};
@@ -391,7 +416,7 @@ const store={
 };
 
 /* STORAGE */
-async function loadSettings(){try{const r=await store.get('shop:settings');DB.settings=r?Object.assign({},DEFAULTS,r.value):Object.assign({},DEFAULTS);}catch(e){DB.settings=Object.assign({},DEFAULTS);throw e;}}
+async function loadSettings(){try{const r=await store.get('shop:settings');DB.settings=r?Object.assign({},DEFAULTS,r.value):Object.assign({},DEFAULTS);DB.settings.categories=normalizeCats(DB.settings.categories);}catch(e){DB.settings=Object.assign({},DEFAULTS);DB.settings.categories=normalizeCats(DB.settings.categories);throw e;}}
 async function saveSettingsStore(){try{await store.set('shop:settings',DB.settings);}catch(e){toast('Could not save settings — check your connection');}}
 async function loadProducts(){DB.products=[];const vals=await store.allValues('product:');DB.products=vals;DB.products.sort((a,b)=>(b.created||0)-(a.created||0));}
 
@@ -420,12 +445,12 @@ function waSelection(){const n=num();if(!n)return null;const items=selection.map
 function waGeneric(){const n=num();return n?`https://wa.me/${n}?text=${encodeURIComponent(t().generic)}`:null;}
 
 /* FILTERS + GRID */
-function cats(){return [...new Set(DB.products.map(p=>p.cat).filter(Boolean))];}
+function cats(){return DB.settings.categories||[];}
 function renderFilters(){
   const f=$('filters');const cs=cats();
   let pills=`<button class="pill ${curCat==='all'?'on':''}" onclick="setCat('all')">${t().all}</button>`;
-  pills+=cs.map(c=>`<button class="pill ${curCat===c?'on':''}" onclick="setCat('${esc(c).replace(/'/g,"&#39;")}')">${esc(c)}</button>`).join('');
-  f.innerHTML=`<div class="pills">${cs.length?pills:''}</div>
+  pills+=cs.map(c=>`<button class="pill ${curCat===c.id?'on':''}" onclick="setCat('${esc(c.id).replace(/'/g,"&#39;")}')">${esc(catName(c))}</button>`).join('');
+  f.innerHTML=`<div class="pills">${pills}</div>
     <div class="search"><input type="text" id="searchBox" placeholder="${t().search}" value="${esc(search)}" oninput="onSearch(this.value)"></div>`;
 }
 function setCat(c){curCat=c;renderFilters();renderGrid();}
@@ -433,7 +458,7 @@ function onSearch(v){search=v;renderGrid();}
 function filtered(){return DB.products.filter(p=>{
   const okCat=curCat==='all'||p.cat===curCat;
   const q=search.trim().toLowerCase();
-  const okQ=!q||(p.name+' '+(p.desc||'')+' '+(p.cat||'')).toLowerCase().includes(q);
+  const okQ=!q||(p.name+' '+(p.desc||'')+' '+catLabel(p.cat)).toLowerCase().includes(q);
   return okCat&&okQ;});}
 function renderGrid(){
   const area=$('gridArea');const list=filtered();
@@ -441,12 +466,12 @@ function renderGrid(){
   if(!DB.products.length){area.innerHTML=`<div class="empty"><h3>${t().soonT}</h3><p>${t().soon}</p></div>`;return;}
   if(!list.length){area.innerHTML=`<div class="empty"><h3>—</h3><p>${t().search}</p></div>`;return;}
   area.innerHTML=`<div class="grid">${list.map(p=>{
-    const imgs=imgsOf(p);const link=waSingle(p);const inSel=selection.includes(p.id);
+    const imgs=imgsOf(p);const link=waSingle(p);const inSel=selection.includes(p.id);const cl=catLabel(p.cat);
     const btn=link?`<a class="wa-btn" href="${link}" target="_blank" rel="noopener">${WA} ${t().order}</a>`
       :`<button class="wa-btn" onclick="toast('${t().noWa}')">${WA} ${t().order}</button>`;
     return `<article class="card">
       <div class="ph" onclick="openDetail('${p.id}')">
-        ${p.cat?`<span class="tag">${esc(p.cat)}</span>`:''}
+        ${cl?`<span class="tag">${esc(cl)}</span>`:''}
         <img src="${imgs[0]||''}" alt="${esc(p.name)}" loading="lazy">
         ${imgs.length>1?`<span class="multi">${STACK} ${imgs.length}</span>`:''}
         <button class="add-sel ${inSel?'in':''}" title="${t().add}" onclick="event.stopPropagation();toggleSel('${p.id}')">${inSel?'✓':'+'}</button>
@@ -475,7 +500,7 @@ function sendSelection(){const link=waSelection();if(!link){toast(t().noWa);retu
 
 /* DETAIL */
 function openDetail(id){const p=DB.products.find(x=>x.id===id);if(!p)return;curDetail=id;curImgs=imgsOf(p);curImgIdx=0;
-  $('detailCat').textContent=p.cat||'';$('detailCat').style.display=p.cat?'block':'none';
+  const dcl=catLabel(p.cat);$('detailCat').textContent=dcl;$('detailCat').style.display=dcl?'block':'none';
   $('detailName').textContent=p.name;$('detailPrice').textContent=p.price||'';
   $('detailDesc').textContent=p.desc||'';
   $('detailMainImg').src=curImgs[0]||'';
@@ -498,7 +523,7 @@ $('overlay').onclick=e=>{if(e.target===$('overlay'))$('overlay').classList.remov
 $('navContact').onclick=e=>{const l=waGeneric();if(l){window.open(l,'_blank');}else{document.getElementById('contact').scrollIntoView();}};
 $('navCollection').onclick=()=>document.getElementById('catalog').scrollIntoView();
 
-function doLogin(){const pw=$('pwInput').value;if(pw===(DB.settings.password||DEFAULTS.password)){$('loginView').classList.add('hide');$('dashView').classList.remove('hide');$('panelTitle').textContent='Manage your shop';fillSettings();renderAdminList();}else toast('Wrong password');$('pwInput').value='';}
+function doLogin(){const pw=$('pwInput').value;if(pw===(DB.settings.password||DEFAULTS.password)){$('loginView').classList.add('hide');$('dashView').classList.remove('hide');$('panelTitle').textContent='Manage your shop';fillSettings();renderProductCatOptions('');renderAdminList();}else toast('Wrong password');$('pwInput').value='';}
 function switchTab(tb){document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('on',b.dataset.tab===tb));$('tab-products').classList.toggle('hide',tb!=='products');$('tab-settings').classList.toggle('hide',tb!=='settings');$('tab-backup').classList.toggle('hide',tb!=='backup');}
 
 function resizeFile(f){return new Promise(res=>{const r=new FileReader();r.onload=ev=>{const img=new Image();img.onload=()=>{const max=1000;let{width:w,height:h}=img;if(w>h&&w>max){h=h*max/w;w=max;}else if(h>max){w=w*max/h;h=max;}const c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(img,0,0,w,h);res(c.toDataURL('image/jpeg',0.78));};img.src=ev.target.result;};r.readAsDataURL(f);});}
@@ -512,13 +537,40 @@ async function saveProduct(){const name=$('pName').value.trim();if(!name){toast(
   const product={id,name,price:$('pPrice').value.trim(),cat:$('pCat').value.trim(),desc:$('pDesc').value.trim(),imgs:pendingImgs.slice(),created:existing?existing.created:Date.now()};
   try{await store.set(id,product);toast(editingId?'Updated':'Added');await loadProducts();renderAll();renderAdminList();resetForm();}
   catch(e){toast('Could not save — try fewer/smaller photos');}}
-function resetForm(){editingId=null;pendingImgs=[];$('pName').value='';$('pPrice').value='';$('pCat').value='';$('pDesc').value='';renderPhotoThumbs();$('formTitle').textContent='Add a piece';$('saveBtn').textContent='Add product';$('cancelEdit').classList.add('hide');}
-function editProduct(id){const p=DB.products.find(x=>x.id===id);if(!p)return;editingId=id;pendingImgs=imgsOf(p).slice();$('pName').value=p.name;$('pPrice').value=p.price||'';$('pCat').value=p.cat||'';$('pDesc').value=p.desc||'';renderPhotoThumbs();$('formTitle').textContent='Edit piece';$('saveBtn').textContent='Save changes';$('cancelEdit').classList.remove('hide');switchTab('products');document.querySelector('.panel-body').scrollTop=0;}
+function resetForm(){editingId=null;pendingImgs=[];$('pName').value='';$('pPrice').value='';renderProductCatOptions('');$('pDesc').value='';renderPhotoThumbs();$('formTitle').textContent='Add a piece';$('saveBtn').textContent='Add product';$('cancelEdit').classList.add('hide');}
+function editProduct(id){const p=DB.products.find(x=>x.id===id);if(!p)return;editingId=id;pendingImgs=imgsOf(p).slice();$('pName').value=p.name;$('pPrice').value=p.price||'';renderProductCatOptions(p.cat||'');$('pDesc').value=p.desc||'';renderPhotoThumbs();$('formTitle').textContent='Edit piece';$('saveBtn').textContent='Save changes';$('cancelEdit').classList.remove('hide');switchTab('products');document.querySelector('.panel-body').scrollTop=0;}
 async function deleteProduct(id){if(!confirm('Delete this product?'))return;try{await store.delete(id);}catch(e){toast('Could not delete — check connection');return;}selection=selection.filter(s=>s!==id);await loadProducts();renderAll();renderAdminList();toast('Deleted');}
-function renderAdminList(){const el=$('adminList');if(!DB.products.length){el.innerHTML='<p style="color:var(--ink-soft);font-size:14px">No products yet.</p>';return;}el.innerHTML=DB.products.map(p=>{const imgs=imgsOf(p);return `<div class="arow"><img src="${imgs[0]||''}"><div class="info"><b>${esc(p.name)}</b><small>${esc(p.price||'No price')}${p.cat?' · '+esc(p.cat):''}${imgs.length>1?' · '+imgs.length+' photos':''}</small></div><button onclick="editProduct('${p.id}')">Edit</button><button class="del" onclick="deleteProduct('${p.id}')">Delete</button></div>`;}).join('');}
+function renderAdminList(){const el=$('adminList');if(!DB.products.length){el.innerHTML='<p style="color:var(--ink-soft);font-size:14px">No products yet.</p>';return;}el.innerHTML=DB.products.map(p=>{const imgs=imgsOf(p);const cl=catLabel(p.cat);return `<div class="arow"><img src="${imgs[0]||''}"><div class="info"><b>${esc(p.name)}</b><small>${esc(p.price||'No price')}${cl?' · '+esc(cl):''}${imgs.length>1?' · '+imgs.length+' photos':''}</small></div><button onclick="editProduct('${p.id}')">Edit</button><button class="del" onclick="deleteProduct('${p.id}')">Delete</button></div>`;}).join('');}
 
-function fillSettings(){$('sName').value=DB.settings.shopName||'';$('sWa').value=DB.settings.whatsapp||'';$('sLang').value=DB.settings.defaultLang||'en';$('sHeroEn').value=DB.settings.heroEn||'';$('sHeroFr').value=DB.settings.heroFr||'';$('sHeroAr').value=DB.settings.heroAr||'';$('sPw').value='';}
-async function saveSettings(){DB.settings.shopName=$('sName').value.trim()||'Maison';DB.settings.whatsapp=$('sWa').value.replace(/[^0-9]/g,'');DB.settings.defaultLang=$('sLang').value;DB.settings.heroEn=$('sHeroEn').value.trim()||DEFAULTS.heroEn;DB.settings.heroFr=$('sHeroFr').value.trim()||DEFAULTS.heroFr;DB.settings.heroAr=$('sHeroAr').value.trim()||DEFAULTS.heroAr;const np=$('sPw').value.trim();if(np)DB.settings.password=np;await saveSettingsStore();renderAll();toast('Settings saved');$('sPw').value='';}
+/* product category dropdown (value=id, text=fr fallback en/ar) */
+function renderProductCatOptions(selId){
+  const sel=$('pCat');if(!sel)return;
+  const list=DB.settings.categories||[];
+  let opts=`<option value="">—</option>`;
+  opts+=list.map(c=>`<option value="${esc(c.id)}">${esc(catNameFr(c))}</option>`).join('');
+  if(selId&&!list.some(c=>c.id===selId))opts+=`<option value="${esc(selId)}">${esc(selId)}</option>`; /* keep an unknown saved category visible while editing */
+  sel.innerHTML=opts;sel.value=selId||'';
+}
+/* settings category editor — one row per category, three language inputs + remove */
+function catRowHtml(c){c=c||{id:'',fr:'',en:'',ar:''};
+  return `<div class="cat-row" data-id="${esc(c.id)}" style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+    <input class="cr-fr" placeholder="Français" value="${esc(c.fr)}" style="margin:0;flex:1;min-width:0">
+    <input class="cr-en" placeholder="English" value="${esc(c.en)}" style="margin:0;flex:1;min-width:0">
+    <input class="cr-ar" dir="rtl" placeholder="العربية" value="${esc(c.ar)}" style="margin:0;flex:1;min-width:0">
+    <button type="button" class="x" title="Remove" style="flex:none" onclick="this.closest('.cat-row').remove()">×</button>
+  </div>`;}
+function renderCatEditor(){const el=$('catEditor');if(!el)return;el.innerHTML=(DB.settings.categories||[]).map(catRowHtml).join('');}
+function addCatRow(){const el=$('catEditor');if(!el)return;el.insertAdjacentHTML('beforeend',catRowHtml());}
+function fillSettings(){renderCatEditor();$('sName').value=DB.settings.shopName||'';$('sWa').value=DB.settings.whatsapp||'';$('sLang').value=DB.settings.defaultLang||'en';$('sHeroEn').value=DB.settings.heroEn||'';$('sHeroFr').value=DB.settings.heroFr||'';$('sHeroAr').value=DB.settings.heroAr||'';$('sPw').value='';}
+async function saveSettings(){DB.settings.shopName=$('sName').value.trim()||'Maison';DB.settings.whatsapp=$('sWa').value.replace(/[^0-9]/g,'');DB.settings.defaultLang=$('sLang').value;DB.settings.heroEn=$('sHeroEn').value.trim()||DEFAULTS.heroEn;DB.settings.heroFr=$('sHeroFr').value.trim()||DEFAULTS.heroFr;DB.settings.heroAr=$('sHeroAr').value.trim()||DEFAULTS.heroAr;
+  /* rebuild categories from editor rows: trim names, drop all-empty rows, keep/generate a stable id */
+  const used=new Set();
+  const newCats=[...document.querySelectorAll('#catEditor .cat-row')].map(r=>({
+    id:(r.dataset.id||'').trim(),fr:r.querySelector('.cr-fr').value.trim(),en:r.querySelector('.cr-en').value.trim(),ar:r.querySelector('.cr-ar').value.trim()
+  })).filter(c=>c.fr||c.en||c.ar);
+  newCats.forEach(c=>{let base=c.id||slugify(c.fr||c.en||c.ar)||'cat',id=base,n=1;while(used.has(id))id=base+'-'+(++n);used.add(id);c.id=id;});
+  DB.settings.categories=newCats;
+  const np=$('sPw').value.trim();if(np)DB.settings.password=np;await saveSettingsStore();renderAll();renderCatEditor();renderProductCatOptions($('pCat')?$('pCat').value:'');toast('Settings saved');$('sPw').value='';}
 
 /* BACKUP */
 function exportData(){const data={settings:DB.settings,products:DB.products,exported:new Date().toISOString()};const blob=new Blob([JSON.stringify(data)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='jewelry-shop-backup.json';a.click();toast('Backup downloaded');}
